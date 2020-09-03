@@ -5,8 +5,6 @@ import csv
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import theano
-import theano.tensor as T
 from neuralnilm.consts import DATA_FOLD_NAMES
 
 
@@ -42,9 +40,9 @@ def sfloatX(data):
     return getattr(np, theano.config.floatX)(data)
 
 
-def ndim_tensor(name, ndim, dtype=theano.config.floatX):
-    tensor_type = T.TensorType(dtype=dtype, broadcastable=((False,) * ndim))
-    return tensor_type(name=name)
+#def ndim_tensor(name, ndim, dtype=theano.config.floatX):
+#    tensor_type = T.TensorType(dtype=dtype, broadcastable=((False,) * ndim))
+#    return tensor_type(name=name)
 
 
 class ANSI:
