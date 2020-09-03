@@ -17,6 +17,7 @@ class Sequence(object):
     target : np.ndarray
     all_appliances : pd.DataFrame
         Column names are the appliance names.
+        Only available if get_batch(..., enable_all_appliances=True, ...)
     metadata : dict
     weights : np.ndarray or None
     """

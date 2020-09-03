@@ -108,7 +108,9 @@ class ActivationOnlySource(ActivationsSource):
 
         Returns
         -------
-        pd.Series
+        positioned_activation : np.array
+        is_complete : whether the activation is completely contained within the sequence
+        seq_start_time : datetime when the sequence starts
         """
         if is_target_appliance:
             allow_nonactive = self.allow_nonactive_target

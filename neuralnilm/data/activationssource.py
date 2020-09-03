@@ -166,7 +166,9 @@ class ActivationsSource(Source):
 
         Returns
         -------
-        pd.Series
+        positioned_activation : np.array
+        is_complete : whether the activation is completely contained within the sequence
+        seq_start_time : datetime when the sequence starts
         """
         if is_target_appliance:
             allow_incomplete = self.allow_incomplete_target
