@@ -43,9 +43,8 @@ class SyntheticAggregateSource(ActivationsSource):
                 self.activations[fold][self.target_appliance][building_name])
             activation_i = self._select_activation(activations)
             activation = activations[activation_i]
-            positioned_activation, is_complete = self._position_activation(
+            positioned_activation, is_complete, _ = self._position_activation(
                 activation, is_target_appliance=True)
-            positioned_activation = positioned_activation.values
             seq.input += positioned_activation
             if enable_all_appliances:
                 all_appliances[self.target_appliance] = positioned_activation
@@ -62,9 +61,8 @@ class SyntheticAggregateSource(ActivationsSource):
             activations = self.activations[fold][appliance][building_name]
             activation_i = self._select_activation(activations)
             activation = activations[activation_i]
-            positioned_activation, is_complete = self._position_activation(
+            positioned_activation, is_complete, _ = self._position_activation(
                 activation, is_target_appliance=False)
-            positioned_activation = positioned_activation.values
             seq.input += positioned_activation
             if enable_all_appliances:
                 all_appliances[appliance] = positioned_activation

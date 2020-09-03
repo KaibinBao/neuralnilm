@@ -31,11 +31,15 @@ class StrideSource(Source):
     def __init__(self, target_appliance,
                  seq_length, filename, windows, sample_period,
                  stride=None,
-                 rng_seed=None):
+                 rng_seed=None,
+                 sanity_check=1):
         self.target_appliance = target_appliance
         self.seq_length = seq_length
         self.filename = filename
-        check_windows(windows)
+
+        if sanity_check:
+            check_windows(windows)
+
         self.windows = windows
         self.sample_period = sample_period
         self.stride = self.seq_length if stride is None else stride
@@ -44,6 +48,9 @@ class StrideSource(Source):
         # stop validation only when we've gone through all validation data
         self.num_batches_for_validation = None
 
+        if (stride > seq_length):
+            raise ValueError("`stride` should not be greater than `seq_length` ")
+        
         self._load_data_into_memory()
         self._compute_num_sequences_per_building()
 
@@ -57,8 +64,8 @@ class StrideSource(Source):
         # Load dataset
         dataset = nilmtk.DataSet(self.filename)
 
-        for fold, buildings_and_windows in self.windows.iteritems():
-            for building_i, window in buildings_and_windows.iteritems():
+        for fold, buildings_and_windows in self.windows.items():
+            for building_i, window in buildings_and_windows.items():
                 dataset.set_window(*window)
                 elec = dataset.buildings[building_i].elec
                 building_name = (
@@ -103,8 +110,8 @@ class StrideSource(Source):
     def _compute_num_sequences_per_building(self):
         index = []
         all_num_seqs = []
-        for fold, buildings in self.data.iteritems():
-            for building_name, df in buildings.iteritems():
+        for fold, buildings in self.data.items():
+            for building_name, df in buildings.items():
                 remainder = len(df) - self.seq_length
                 num_seqs = np.ceil(remainder / self.stride) + 1
                 num_seqs = max(0 if df.empty else 1, int(num_seqs))
@@ -126,7 +133,7 @@ class StrideSource(Source):
         building_name = building_divisions.index[0]
         prev_division = 0
         for seq_i in range(total_seq_for_fold):
-            if seq_i == building_divisions.iloc[building_row_i]:
+            if seq_i == building_divisions.values[building_row_i]:
                 prev_division = seq_i
                 building_row_i += 1
                 building_name = building_divisions.index[building_row_i]
@@ -134,14 +141,17 @@ class StrideSource(Source):
             seq_i_for_building = seq_i - prev_division
             start_i = seq_i_for_building * self.stride
             end_i = start_i + self.seq_length
-            data_for_seq = self.data[fold][building_name].iloc[start_i:end_i]
+            dataframe = self.data[fold][building_name]
+            columns = dataframe.columns
+            data_for_seq = dataframe.values[start_i:end_i]
 
             def get_data(col):
-                data = data_for_seq[col].values
-                n_zeros_to_pad = self.seq_length - len(data)
-                data = np.pad(
-                    data, pad_width=(0, n_zeros_to_pad), mode='constant')
-                return data[:, np.newaxis]
+                col_i = columns.get_loc(col)
+                data = data_for_seq[:,col_i]
+                len_data = len(data)
+                zero_padded_data = np.zeros((self.seq_length, 1))
+                zero_padded_data[:len_data,0] = data
+                return zero_padded_data
 
             seq = Sequence(self.seq_length)
             seq.input = get_data('mains')
@@ -160,8 +170,9 @@ class StrideSource(Source):
                 'seq_i': seq_i,
                 'building_name': building_name,
                 'total_num_sequences': total_seq_for_fold,
-                'start_date': data_for_seq.index[0],
-                'end_date': data_for_seq.index[-1]
+                # this takes a lot of time:
+                'start_date': dataframe.index[start_i],
+                'end_date': dataframe.index[start_i+len(data_for_seq)-1]
             }
 
             yield seq

@@ -10,8 +10,16 @@ class DataPipeline(object):
                  input_processing=None,
                  target_processing=None,
                  source_probabilities=None,
-                 rng_seed=None):
-        self.sources = sources
+                 rng_seed=None,
+                 dtype=np.float32):
+        self.source_ids = {}
+        self.source_names = []
+        self.sources = []
+        for source in sources:
+            self.source_ids[source] = len(self.sources)
+            self.sources.append(sources[source])
+            self.source_names.append(source)
+        #self.sources = np.array(self.sources)
         self.num_seq_per_batch = num_seq_per_batch
         self.input_processing = none_to_list(input_processing)
         self.target_processing = none_to_list(target_processing)
@@ -23,6 +31,10 @@ class DataPipeline(object):
         self.rng_seed = rng_seed
         self.rng = np.random.RandomState(self.rng_seed)
         self._source_iterators = [None] * num_sources
+        self.dtype = dtype
+
+    def reset_iterators(self):
+        self._source_iterators = [None] * len(self.sources)
 
     def get_batch(self, fold='train', enable_all_appliances=False,
                   source_id=None, reset_iterator=False,
@@ -35,6 +47,8 @@ class DataPipeline(object):
         if source_id is None:
             n = len(self.sources)
             source_id = self.rng.choice(n, p=self.source_probabilities)
+        else:
+            source_id = self.source_ids[source_id]
         if reset_iterator or self._source_iterators[source_id] is None:
             self._source_iterators[source_id] = (
                 self.sources[source_id].get_batch(
@@ -43,7 +57,7 @@ class DataPipeline(object):
                     enable_all_appliances=enable_all_appliances,
                     validation=validation))
         try:
-            batch = self._source_iterators[source_id].next()
+            batch = next(self._source_iterators[source_id])
         except StopIteration:
             self._source_iterators[source_id] = None
             return None
@@ -54,6 +68,7 @@ class DataPipeline(object):
                 batch.before_processing.target, 'target')
             batch.metadata.update({
                 'source_id': source_id,
+                'source_name': self.source_names[source_id],
                 'processing': {
                     'input': i_metadata,
                     'target': t_metadata
@@ -83,7 +98,7 @@ class DataPipeline(object):
             data = step(data)
             if hasattr(step, 'metadata'):
                 metadata.update(step.metadata)
-        return data, metadata
+        return data.astype(self.dtype), metadata
 
     def apply_inverse_processing(self, data, net_input_or_target):
         """Applies the inverse of `<input, target>_processing` to `data`.

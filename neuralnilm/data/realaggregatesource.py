@@ -42,12 +42,15 @@ class RealAggregateSource(ActivationsSource):
                  include_incomplete_target_in_output=True,
                  allow_multiple_target_activations_in_aggregate=False,
                  include_multiple_targets_in_output=False,
-                 rng_seed=None):
+                 rng_seed=None,
+                 sanity_check=1):
         self.activations = copy(activations)
         self.target_appliance = target_appliance
         self.seq_length = seq_length
         self.filename = filename
-        check_windows(windows)
+        if sanity_check:
+            check_windows(windows)
+
         self.windows = windows
         self.sample_period = sample_period
         self.target_inclusion_prob = target_inclusion_prob
@@ -75,8 +78,8 @@ class RealAggregateSource(ActivationsSource):
 
         self.mains = {}
         self.mains_good_sections = {}
-        for fold, buildings_and_windows in self.windows.iteritems():
-            for building_i, window in buildings_and_windows.iteritems():
+        for fold, buildings_and_windows in self.windows.items():
+            for building_i, window in buildings_and_windows.items():
                 dataset.set_window(*window)
                 elec = dataset.buildings[building_i].elec
                 building_name = (
@@ -114,8 +117,10 @@ class RealAggregateSource(ActivationsSource):
         """
         self.sections_with_no_target = {}
         seq_length_secs = self.seq_length * self.sample_period
-        for fold, sects_per_building in self.mains_good_sections.iteritems():
-            for building, good_sections in sects_per_building.iteritems():
+        for fold, sects_per_building in self.mains_good_sections.items():
+            for building, good_sections in sects_per_building.items():
+                if building not in self.activations[fold][self.target_appliance]:
+                    continue
                 activations = (
                     self.activations[fold][self.target_appliance][building])
                 mains = self.mains[fold][building]
@@ -123,8 +128,10 @@ class RealAggregateSource(ActivationsSource):
                 gaps_between_activations = TimeFrameGroup()
                 prev_end = mains.index[0]
                 for activation in activations:
-                    gap = TimeFrame(prev_end, activation.index[0])
-                    gaps_between_activations.append(gap)
+                    activation_start = activation.index[0]
+                    if prev_end < activation_start:
+                        gap = TimeFrame(prev_end, activation_start)
+                        gaps_between_activations.append(gap)
                     prev_end = activation.index[-1]
                 gap = TimeFrame(prev_end, mains.index[-1])
                 gaps_between_activations.append(gap)
@@ -140,9 +147,9 @@ class RealAggregateSource(ActivationsSource):
     def _compute_gap_probabilities(self):
         # Choose a building and a gap
         self.all_gaps = {}
-        for fold in DATA_FOLD_NAMES:
+        for fold in list(self.activations.keys()):
             all_gaps_for_fold = []
-            for building, gaps in self.sections_with_no_target[fold].iteritems():
+            for building, gaps in self.sections_with_no_target[fold].items():
                 gaps_for_building = [
                     (building, gap, gap.timedelta.total_seconds())
                     for gap in gaps]
@@ -156,6 +163,7 @@ class RealAggregateSource(ActivationsSource):
         # Choose a building and a gap
         all_gaps_for_fold = self.all_gaps[fold]
         n = len(all_gaps_for_fold)
+        assert(n != 0)
         gap_i = self.rng.choice(n, p=all_gaps_for_fold['p'])
         row = all_gaps_for_fold.iloc[gap_i]
         building, gap = row['building'], row['gap']
@@ -186,7 +194,7 @@ class RealAggregateSource(ActivationsSource):
 
     def _remove_activations_with_no_mains(self):
         # First remove any activations where there is no mains data at all
-        for fold, activations_for_appliance in self.activations.iteritems():
+        for fold, activations_for_appliance in self.activations.items():
             activations_for_buildings = activations_for_appliance[
                 self.target_appliance]
             buildings_to_remove = []
@@ -200,10 +208,10 @@ class RealAggregateSource(ActivationsSource):
 
         # Now check for places where mains has insufficient samples,
         # for example because the mains series has a break in it.
-        for fold, activations_for_appliance in self.activations.iteritems():
+        for fold, activations_for_appliance in self.activations.items():
             activations_for_buildings = activations_for_appliance[
                 self.target_appliance]
-            for building, activations in activations_for_buildings.iteritems():
+            for building, activations in activations_for_buildings.items():
                 mains = self.mains[fold][building]
                 activations_to_remove = []
                 for i, activation in enumerate(activations):
@@ -236,10 +244,13 @@ class RealAggregateSource(ActivationsSource):
             raise ValueError("`enable_all_appliances` is not implemented yet"
                              " for RealAggregateSource!")
 
-        if self.rng.binomial(n=1, p=self.target_inclusion_prob):
+        if(self.all_gaps[fold].empty): # check if there are any sequences without target
             _seq_getter_func = self._get_sequence_which_includes_target
         else:
-            _seq_getter_func = self._get_sequence_without_target
+            if self.rng.binomial(n=1, p=self.target_inclusion_prob):
+                _seq_getter_func = self._get_sequence_which_includes_target
+            else:
+                _seq_getter_func = self._get_sequence_without_target
 
         MAX_RETRIES = 50
         for retry_i in range(MAX_RETRIES):
@@ -268,37 +279,56 @@ class RealAggregateSource(ActivationsSource):
             self.activations[fold][self.target_appliance][building_name])
         activation_i = self._select_activation(activations)
         activation = activations[activation_i]
-        positioned_activation, is_complete = (
+        positioned_activation_values, is_complete, activation_start_time = (
             self._position_activation(
                 activation, is_target_appliance=True))
+        #positioned_activation = self._construct_series(
+        #        positioned_activation_values, activation_start_time)
         if is_complete or self.include_incomplete_target_in_output:
-            seq.target = positioned_activation
+            seq.target = positioned_activation_values
         else:
-            seq.target = pd.Series(0, index=positioned_activation.index)
+            seq.target = np.zeros(self.seq_length)
+            #pd.Series(0, index=positioned_activation.index)
 
         # Check neighbouring activations
-        mains_start = positioned_activation.index[0]
-        mains_end = positioned_activation.index[-1]
+        #mains_start = positioned_activation.index[0]
+        #mains_end = positioned_activation.index[-1]
+        mains_start = activation_start_time
+        mains_end = activation_start_time + timedelta(
+            seconds=self.sample_period * (self.seq_length-1))
+        npfreq = np.timedelta64(self.sample_period, 's')
 
         def neighbours_ok(neighbour_indicies):
             for i in neighbour_indicies:
                 activation = activations[i]
+                activation_start = activation.index[0]
+                activation_end = activation.index[-1]
                 activation_duration = (
-                    activation.index[-1] - activation.index[0])
+                    activation_end - activation_start)
                 neighbouring_activation_is_inside_mains_window = (
-                    activation.index[0] >
+                    activation_start >
                     (mains_start - activation_duration)
-                    and activation.index[0] < mains_end)
+                    and activation_start < mains_end)
+                activation_values = activation.values
 
                 if neighbouring_activation_is_inside_mains_window:
                     if self.allow_multiple_target_activations_in_aggregate:
                         if self.include_multiple_targets_in_output:
-                            sum_target = seq.target.add(
-                                activation, fill_value=0)
-                            is_complete = (
-                                sum_target.index == seq.target.index)
+                            is_complete = \
+                                (activation_start >= mains_start) and\
+                                (activation_end <= mains_end)
                             if self.allow_incomplete_target or is_complete:
-                                seq.target = sum_target[seq.target.index]
+                                start_i = (activation_start - mains_start)//npfreq
+                                if start_i < 0: # activation before mains
+                                    n = min(self.seq_length, len(activation_values)+start_i)
+                                    seq.target[0:n] += activation_values[-start_i:(n-start_i)]
+                                    #sum_target = seq.target[0:n] + activation_values[-start_i:(n-start_i)]
+                                    #seq.target[0:n] += sum_target
+                                else: # mains before activation
+                                    n = min(self.seq_length-start_i, len(activation_values))
+                                    seq.target[start_i:(start_i+n)] += activation_values[0:n]
+                                    #sum_target = seq.target[start_i:(start_i+n)] + activation_values[0:n]
+                                    #seq.target[start_i:(start_i+n)] = sum_target
                     else:
                         return False  # need to retry
                 else:

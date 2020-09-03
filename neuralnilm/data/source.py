@@ -20,10 +20,14 @@ class Sequence(object):
     metadata : dict
     weights : np.ndarray or None
     """
+
+    # 'constant' empty dataframe as class variable
+    empty_df = pd.DataFrame()
+
     def __init__(self, shape):
         self.input = np.zeros(shape, dtype=np.float32)
         self.target = np.zeros(shape, dtype=np.float32)
-        self.all_appliances = pd.DataFrame()
+        self.all_appliances = Sequence.empty_df
         self.metadata = {}
         self.weights = None
 
@@ -65,7 +69,7 @@ class Source(object):
             all_appliances = {}
             for i in range(num_seq_per_batch):
                 try:
-                    seq = seq_iterator.next()
+                    seq = next(seq_iterator)
                 except StopIteration:
                     stop = True
                     seq = Sequence((self.seq_length, 1))

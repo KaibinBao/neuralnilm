@@ -6,7 +6,7 @@ class DataProcess(Process):
     def __init__(self, data_pipeline, **get_batch_kwargs):
         super(DataProcess, self).__init__(name='neuralnilm-data-process')
         self._stop = Event()
-        self._queue = Queue(maxsize=3)
+        self._queue = Queue(maxsize=256)
         self.data_pipeline = data_pipeline
         self._get_batch_kwargs = get_batch_kwargs
 
